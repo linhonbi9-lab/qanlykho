@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quản lý mét dư vật tư</title>
+
+<script src="https://unpkg.com/html5-qrcode"></script>
+
+<style>
+body { font-family: Arial; padding: 10px; }
+input, select, button {
+    width: 100%;
+    padding: 10px;
+    margin: 5px 0;
+    font-size: 16px;
+}
+table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+th, td { border: 1px solid #ccc; padding: 6px; text-align: center; }
+button.delete { background: red; color: white; }
+#reader { width: 100%; margin-top: 10px; }
+.currentPX {
+    font-weight: bold;
+    color: blue;
+    margin-top: 5px;
+}
+</style>
+</head>
+
+<body>
+
+<h3>📦 Quản lý mét dư vật tư</h3>
+
+<select id="filterPX" onchange="updatePX(); render();">
+    <option value="all">-- Chọn phân xưởng --</option>
+    <option value="may1">May 1</option>
+    <option value="may2">May 2</option>
+    <option value="may3">May 3</option>
+</select>
+
+<div class="currentPX" id="currentPX">Chưa chọn phân xưởng</div>
+
+<button onclick="startScan()">📷 Quét QR / Barcode</button>
+<button onclick="stopScan()">⛔ Tắt camera</button>
+<div id="reader"></div>
+
+<input id="barcode" placeholder="Mã Barcode">
+
+<input id="mavattu" list="mavattuList" placeholder="Mã vật tư">
+<datalist id="mavattuList"></datalist>
+
+<input id="metdu" type="number" placeholder="Số mét dư">
+
+<button onclick="addData()">➕ Lưu dữ liệu</button>
+
+<hr>
+
+<input id="search" list="searchList" placeholder="🔍 Tìm..." onkeyup="render()">
+<datalist id="searchList"></datalist>
+
+<table>
+<thead>
+<tr>
+<th>Barcode</th>
+<th>Mã vật tư</th>
+<th>Phân xưởng</th>
+<th>Mét dư</th>
+<th>Xoá</th>
+</tr>
+</thead>
+<tbody id="dataTable"></tbody>
+</table>
+
+<script>
+let data = JSON.parse(localStorage.getItem("metdu")) || [];
+let html5Qr = null;
+let scanning = false;
+
+function saveData() {
+    localStorage.setItem("metdu", JSON.stringify(data));
+}
+
+function updateSuggestions() {
+    const mavattuSet = new Set();
+    const searchSet = new Set();
+
+    data.forEach(item => {
+        if (item.mavattu) {
+            mavattuSet.add(item.mavattu);
+            searchSet.add(item.mavattu);
+        }
+        if (item.barcode) {
+            searchSet.add(item.barcode);
+        }
+    });
+
+    const mavattuList = document.getElementById("mavattuList");
+    mavattuList.innerHTML = "";
+    mavattuSet.forEach(val => {
+        mavattuList.innerHTML += `<option value="${val}">`;
+    });
+
+    const searchList = document.getElementById("searchList");
+    searchList.innerHTML = "";
+    searchSet.forEach(val => {
+        searchList.innerHTML += `<option value="${val}">`;
+    });
+}
+
+function updatePX() {
+    const px = document.getElementById("filterPX").value;
+    const text = document.getElementById("currentPX");
+
+    if (px === "all") {
+        text.innerHTML = "Chưa chọn phân xưởng";
+    } else {
+        text.innerHTML = "Đang nhập cho: " + px.toUpperCase();
+    }
+}
+
+function render() {
+    const table = document.getElementById("dataTable");
+    const selectedPX = document.getElementById("filterPX").value;
+    const key = document.getElementById("search").value.toLowerCase();
+
+    table.innerHTML = "";
+
+    let filtered = data.filter(item => {
+        if (key) {
+            return (item.barcode || "").toLowerCase().includes(key) ||
+                   (item.mavattu || "").toLowerCase().includes(key) ||
+                   (item.phanxuong || "").toLowerCase().includes(key);
+        }
+        return (selectedPX === "all") || (item.phanxuong === selectedPX);
+    });
+
+    filtered.forEach(item => {
+        const index = data.indexOf(item);
+
+        table.innerHTML += `
+        <tr>
+            <td>${item.barcode}</td>
+            <td>${item.mavattu}</td>
+            <td>${item.phanxuong}</td>
+            <td>${item.metdu}</td>
+            <td><button class="delete" onclick="removeData(${index})">X</button></td>
+        </tr>`;
+    });
+}
+
+function addData() {
+    const barcode = document.getElementById("barcode").value.trim();
+    const mavattu = document.getElementById("mavattu").value.trim();
+    const phanxuong = document.getElementById("filterPX").value;
+    const metdu = parseFloat(document.getElementById("metdu").value);
+
+    if (!barcode && !mavattu) {
+        alert("Nhập Barcode hoặc Mã vật tư!");
+        return;
+    }
+
+    if (phanxuong === "all") {
+        alert("Vui lòng chọn phân xưởng!");
+        return;
+    }
+
+    if (isNaN(metdu) || metdu <= 0) {
+        alert("Mét dư phải > 0!");
+        return;
+    }
+
+    data.push({ barcode, mavattu, phanxuong, metdu });
+    saveData();
+    updateSuggestions();
+    render();
+
+    document.getElementById("barcode").value = "";
+    document.getElementById("mavattu").value = "";
+    document.getElementById("metdu").value = "";
+}
+
+function removeData(index) {
+    if (confirm("Xoá dữ liệu này?")) {
+        data.splice(index, 1);
+        saveData();
+        updateSuggestions();
+        render();
+    }
+}
+
+function startScan() {
+    if (scanning) return;
+
+    html5Qr = new Html5Qrcode("reader");
+    scanning = true;
+
+    html5Qr.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: 250 },
+        (decodedText) => {
+            document.getElementById("barcode").value = decodedText;
+            stopScan();
+        }
+    );
+}
+
+function stopScan() {
+    if (html5Qr && scanning) {
+        html5Qr.stop().then(() => {
+            document.getElementById("reader").innerHTML = "";
+            scanning = false;
+        });
+    }
+}
+
+updatePX();
+updateSuggestions();
+render();
+</script>
+
+</body>
+</html>
